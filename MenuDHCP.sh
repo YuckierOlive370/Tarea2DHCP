@@ -32,6 +32,9 @@ VerificarServicio() {
     else
         echo "El servicio DHCP ya esta instalado"
     fi
+
+    echo "Configurando interfaz ens37 para DHCP..."
+    sudo sed -i 's/^INTERFACESv4=.*/INTERFACESv4="ens37"/' /etc/default/isc-dhcp-server
 }
 
 Configurar() {
