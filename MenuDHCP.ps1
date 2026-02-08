@@ -18,7 +18,7 @@ function Pedir-IP {
     do {
         $ip = Read-Host $mensaje
         if (-not (Validar-IP $ip)) {
-            Write-Host "IP no válida, intenta de nuevo"
+            Write-Host "IP no valida, intenta de nuevo"
         }
     } until (Validar-IP $ip)
 
@@ -36,7 +36,7 @@ function VerificarServicio{
 
 function Configurar{
     if (-not (Get-WindowsFeature DHCP).Installed) {
-    Write-Host "El rol DHCP no está instalado. Instálalo primero."
+    Write-Host "El rol DHCP no esta instalado. Instalalo primero."
     return
     }
 
@@ -57,25 +57,30 @@ function Configurar{
     $gateway = Pedir-IP "Gateway"
     $dns = Pedir-IP "DNS"
     do {
-        $lease = Read-Host "Tiempo de concesión (días)"
+        $lease = Read-Host "Tiempo de concesion (días)"
     } until ($lease -match '^\d+$')
 
     #verificar si ya existe un ambito
     $scopeExistente = Get-DhcpServerv4Scope -ErrorAction SilentlyContinue |
-    Where-Object { $_.Name -eq $scopeName }
+    Where-Object { $_.StartRange -eq $startIP -or $_.EndRange -eq $endIP }
+
 
     if  ($scopeExistente) {
         Write-Host "El ambito DHCP ya existe. No se creara uno nuevo"
     } else {
+        try {
+            Add-DhcpServerv4Scope `
+            -Name $scopeName `
+            -StartRange $startIP `
+            -EndRange $endIP `
+            -SubnetMask 255.255.255.0 `
+            -LeaseDuration (New-TimeSpan -Days $lease)
+            Write-Host "Ambito creado correctamente"
+            }
+            catch {
+                Write-Host "Error al crear el ambito: ya existe o es invalido"
+                }
 
-        Add-DhcpServerv4Scope `
-        -Name $scopeName `
-        -StartRange $startIP `
-        -EndRange $endIP `
-        -SubnetMask 255.255.255.0 `
-        -LeaseDuration (New-TimeSpan -Days $lease)
-        Write-Host "Ambito creado correctamente"
-        
     }
 
     Set-DhcpServerv4OptionValue `
