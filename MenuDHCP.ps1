@@ -1,6 +1,13 @@
 function Validar-IP {
     param ($ip)
-    return $ip -match '^(\d{1,3}\.){3}\d{1,3}$'
+    return $ip -match '^((25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)\.){3}(25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)$'
+}
+
+function IP-a-Int {
+    param ([string]$ip)
+    $bytes = [System.Net.IPAddress]::Parse($ip).GetAddressBytes()
+    [Array]::Reverse($bytes)
+    return [BitConverter]::ToUInt32($bytes, 0)
 }
 
 function Pedir-IP {
@@ -38,10 +45,14 @@ function Configurar{
 
     do {
     $endIP = Pedir-IP "IP final"
-    if ([IPAddress]$startIP -gt [IPAddress]$endIP) {
+
+    $startInt = IP-a-Int $startIP
+    $endInt   = IP-a-Int $endIP
+
+    if ($startInt -gt $endInt) {
         Write-Host "La IP inicial no puede ser mayor que la IP final"
     }
-    } until ([IPAddress]$startIP -le [IPAddress]$endIP)
+    } until ($startInt -le $endInt)
 
     $gateway = Pedir-IP "Gateway"
     $dns = Pedir-IP "DNS"
@@ -68,8 +79,9 @@ function Configurar{
     }
 
     Set-DhcpServerv4OptionValue `
-    -Router $gateway `
-    -DnsServer $dns
+    -Router ([IPAddress]$gateway) `
+    -DnsServer @([IPAddress]$dns)
+
 }
 
 function ConsultarEstado{
@@ -85,7 +97,7 @@ function ListarConcesiones{
 $con = "S"
 
 while ($con -eq "S") {
-    Write-Host "Tarea 2: Automatización y Gestión del Servidor DHCP"
+    Write-Host "Tarea 2: Automatizacion y Gestion del Servidor DHCP"
     Write-Host "++++++++ Menu de Opciones ++++++++"
     Write-Host "1.-Verificar la presencia del servicio"
     Write-Host "2.-Configuracion dinamica"
