@@ -66,8 +66,6 @@ function Instalar {
         return
     }
 
-    }
-
     $dns = Pedir-IP "DNS"
 
     do {
