@@ -43,7 +43,7 @@ VerificarServicio() {
     else
         echo "El servicio DHCP no esta instalado"
     fi
-    
+
 }
 
 Instalar() {
@@ -90,8 +90,10 @@ subnet $red netmask $MASCARA {
     option domain-name-servers $dns;
 }
 EOF
-
-    sudo dhcpd -t && sudo systemctl restart isc-dhcp-server
+    echo "Validando configuración..."
+    sudo dhcpd -t
+    echo "Reiniciando servicio DHCP..."
+    sudo systemctl restart isc-dhcp-server
     echo "Ambito DHCP configurado correctamente."
 }
 
