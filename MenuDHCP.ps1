@@ -63,36 +63,33 @@ function Instalar {
         Write-Host "El gateway no pertenece al mismo rango de la subred."
         return
     }
+    
+    try {
 
-    $scopeExistente = Get-DhcpServerv4Scope -ErrorAction SilentlyContinue |
-        Where-Object { $_.StartRange -eq $startIP -or $_.EndRange -eq $endIP }
+        # Instalacion silenciosa DHCP
+        Install-WindowsFeature DHCP -IncludeManagementTools -ErrorAction Stop | Out-Null
+        Import-Module DhcpServer -ErrorAction Stop
+        Start-Service DHCPServer
 
-    if ($scopeExistente) {
-        Write-Host "El ambito DHCP ya existe. No se creara uno nuevo."
-    } else {
-        try {
-            # Instalacion silenciosa DHCP
-            Install-WindowsFeature DHCP -IncludeManagementTools -ErrorAction Stop | Out-Null
+        # Crear el ambito
+        Add-DhcpServerv4Scope `
+            -Name $scopeName `
+            -StartRange $startIP `
+            -EndRange $endIP `
+            -SubnetMask $subnetMask `
+            -LeaseDuration (New-TimeSpan -Days $lease) | Out-Null
 
-            # Crear el ambito
-            Add-DhcpServerv4Scope `
-                -Name $scopeName `
-                -StartRange $startIP `
-                -EndRange $endIP `
-                -SubnetMask $subnetMask `
-                -LeaseDuration (New-TimeSpan -Days $lease) | Out-Null
+        # Configurar opciones de gateway y DNS
+        $scopeID = ($startInt -band $maskInt)
+        $scopeID = [System.Net.IPAddress]::new($scopeID).ToString()
+        Set-DhcpServerv4OptionValue -ScopeID $scopeID -Router $gateway -DnsServer $dns
 
-            # Configurar opciones de gateway y DNS
-            $scopeID = ($startInt -band $maskInt)
-            $scopeID = [System.Net.IPAddress]::new($scopeID).ToString()
-            Set-DhcpServerv4OptionValue -ScopeID $scopeID -Router $gateway -DnsServer $dns
-
-            Write-Host "Ambito creado y configurado correctamente." -ForegroundColor Green
-        }
-        catch {
-            Write-Host "Error al crear el ambito: $_" -ForegroundColor Red
-        }
+        Write-Host "Ambito creado y configurado correctamente." -ForegroundColor Green
     }
+    catch {
+        Write-Host "Error al crear el ambito: $_" -ForegroundColor Red
+    }
+
 }
 
 function InstalarVal {
