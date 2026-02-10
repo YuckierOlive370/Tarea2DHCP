@@ -47,12 +47,9 @@ VerificarServicio() {
     sudo sed -i "s/^INTERFACESv4=.*/INTERFACESv4=\"$INTERFAZ\"/" /etc/default/isc-dhcp-server
 }
 
-Instalar() { # instalacion silenciosa y validaciones
-    sudo apt-get update -y > /dev/null 2>&1
-    sudo apt-get install isc-dhcp-server -y > /dev/null 2>&1
-    sudo systemctl enable isc-dhcp-server > /dev/null 2>&1
-
+Instalar() {
     read -p "Nombre del ambito: " scope
+
     rango_inicio=$(PedirIp "IP inicial: ")
 
     while true; do
@@ -61,31 +58,22 @@ Instalar() { # instalacion silenciosa y validaciones
         echo "La IP inicial no puede ser mayor que la IP final"
     done
 
+    # Validación correcta: inicio y fin en la misma subred
     inicioInt=$(IPaInt "$rango_inicio")
     finInt=$(IPaInt "$rango_fin")
     maskInt=$(IPaInt "$MASCARA")
-    redInicio=$(( inicioInt & maskInt ))
-    redFin=$(( finInt & maskInt ))
-    if (( redInicio != redFin )); then
-        echo "La IP inicial y la IP final no pertenecen al mismo segmento de red"
+
+    (( (inicioInt & maskInt) == (finInt & maskInt) )) || {
+        echo "El rango no pertenece a la misma subred"
         return
-    fi
+    }
 
     read -p "Tiempo de concesion (en segundos): " lease_time
     gateway=$(PedirIp "Gateway: ")
     dns=$(PedirIp "DNS: ")
 
-    ipServidor=$(ip -4 addr show $INTERFAZ | grep inet | awk '{print $2}' | cut -d/ -f1)
-
-    ipInt=$(IPaInt "$ipServidor")
-    maskInt=$(IPaInt "$MASCARA")
-    redInt=$(( ipInt & maskInt ))
-
-    gatewayInt=$(IPaInt "$gateway")
-    (( (gatewayInt & maskInt) == redInt )) || {
-        echo "El gateway no pertenece a la misma subred"
-        return
-    }
+    # Red calculada desde el rango (NO desde la IP del servidor)
+    redInt=$(( inicioInt & maskInt ))
 
     red=$(printf "%d.%d.%d.0" \
         $(( (redInt >> 24) & 255 )) \
