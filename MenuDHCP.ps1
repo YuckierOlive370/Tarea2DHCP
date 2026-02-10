@@ -78,17 +78,21 @@ function Instalar {
             -EndRange $endIP `
             -SubnetMask $subnetMask `
             -LeaseDuration (New-TimeSpan -Days $lease) | Out-Null
-
-        # Configurar opciones de gateway y DNS
-        $scopeID = ($startInt -band $maskInt)
-        $scopeID = [System.Net.IPAddress]::new($scopeID).ToString()
-        Set-DhcpServerv4OptionValue -ScopeID $scopeID -Router $gateway -DnsServer $dns
-
+            
         Write-Host "Ambito creado y configurado correctamente." -ForegroundColor Green
     }
     catch {
         Write-Host "Error al crear el ambito: $_" -ForegroundColor Red
     }
+
+    $scope = Get-DhcpServerv4Scope |
+    Where-Object { $_.StartRange -eq $startIP -and $_.EndRange -eq $endIP }
+    
+    Set-DhcpServerv4OptionValue `
+    -ScopeId $scope.ScopeId `
+    -Router $gateway `
+    -DnsServer $dns
+
 
 }
 
