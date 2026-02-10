@@ -43,11 +43,11 @@ VerificarServicio() {
     else
         echo "El servicio DHCP no esta instalado"
     fi
-
-    sudo sed -i "s/^INTERFACESv4=.*/INTERFACESv4=\"$INTERFAZ\"/" /etc/default/isc-dhcp-server
+    
 }
 
 Instalar() {
+    sudo sed -i "s/^INTERFACESv4=.*/INTERFACESv4=\"$INTERFAZ\"/" /etc/default/isc-dhcp-server
     read -p "Nombre del ambito: " scope
 
     rango_inicio=$(PedirIp "IP inicial: ")
