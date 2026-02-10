@@ -47,7 +47,11 @@ VerificarServicio() {
 }
 
 Instalar() {
-    sudo sed -i "s/^INTERFACESv4=.*/INTERFACESv4=\"$INTERFAZ\"/" /etc/default/isc-dhcp-server
+    echo "Instalando DHCP..."
+    sudo apt-get update -y -qq > /dev/null 2>&1
+    sudo apt-get install isc-dhcp-server -y -qq > /dev/null 2>&1
+    sudo systemctl enable isc-dhcp-server > /dev/null 2>&1
+
     read -p "Nombre del ambito: " scope
 
     rango_inicio=$(PedirIp "IP inicial: ")
@@ -58,7 +62,6 @@ Instalar() {
         echo "La IP inicial no puede ser mayor que la IP final"
     done
 
-    # Validación correcta: inicio y fin en la misma subred
     inicioInt=$(IPaInt "$rango_inicio")
     finInt=$(IPaInt "$rango_fin")
     maskInt=$(IPaInt "$MASCARA")
@@ -72,14 +75,16 @@ Instalar() {
     gateway=$(PedirIp "Gateway: ")
     dns=$(PedirIp "DNS: ")
 
-    # Red calculada desde el rango (NO desde la IP del servidor)
     redInt=$(( inicioInt & maskInt ))
-
     red=$(printf "%d.%d.%d.0" \
         $(( (redInt >> 24) & 255 )) \
         $(( (redInt >> 16) & 255 )) \
         $(( (redInt >> 8) & 255 )))
 
+    # Configurar interfaz en /etc/default/isc-dhcp-server
+    sudo sed -i "s/^INTERFACESv4=.*/INTERFACESv4=\"$INTERFAZ\"/" /etc/default/isc-dhcp-server
+
+    # Escribir configuración en dhcpd.conf
     sudo bash -c "cat > /etc/dhcp/dhcpd.conf" <<EOF
 default-lease-time $lease_time;
 max-lease-time $lease_time;
@@ -90,6 +95,7 @@ subnet $red netmask $MASCARA {
     option domain-name-servers $dns;
 }
 EOF
+
     echo "Validando configuración..."
     sudo dhcpd -t
     echo "Reiniciando servicio DHCP..."
