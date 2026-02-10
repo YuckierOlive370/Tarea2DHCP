@@ -66,9 +66,6 @@ function Instalar {
         return
     }
 
-    if ($gwInt -lt $startInt -or $gwInt -gt $endInt) {
-        Write-Host "El gateway no se encuentra dentro del rango del ambito DHCP."
-        return
     }
 
     $dns = Pedir-IP "DNS"
