@@ -10,7 +10,7 @@ ValidarIp() { # valida formato y descarta 255.255.255.255 y 0.0.0.0
         return $?
     fi
     return 1
-}
+}  
 
 IPaInt() {
     local IFS=.
@@ -60,6 +60,16 @@ Instalar() { # instalacion silenciosa y validaciones
         (( $(IPaInt "$rango_inicio") <= $(IPaInt "$rango_fin") )) && break
         echo "La IP inicial no puede ser mayor que la IP final"
     done
+
+    inicioInt=$(IPaInt "$rango_inicio")
+    finInt=$(IPaInt "$rango_fin")
+    maskInt=$(IPaInt "$MASCARA")
+    redInicio=$(( inicioInt & maskInt ))
+    redFin=$(( finInt & maskInt ))
+    if (( redInicio != redFin )); then
+        echo "La IP inicial y la IP final no pertenecen al mismo segmento de red"
+        return
+    fi
 
     read -p "Tiempo de concesion (en segundos): " lease_time
     gateway=$(PedirIp "Gateway: ")
