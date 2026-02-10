@@ -32,6 +32,7 @@ function Instalar {
     param (
         [string]$subnetMask = "255.255.255.0"
     )
+    Write-Host "Servicio DHCP Instalandose..." -ForegroundColor Green
 
     $scopeName = Read-Host "Nombre del ambito"
     $startIP   = Pedir-IP "IP inicial"
@@ -47,23 +48,35 @@ function Instalar {
         }
     } until ($startInt -le $endInt)
 
-    $gateway = Pedir-IP "Gateway"
-    $dns     = Pedir-IP "DNS"
-
-    do {
-        $lease = Read-Host "Tiempo de concesion (dias)"
-    } until ($lease -match '^\d+$')
-
-    $gwInt = IP-a-Int $gateway
     $maskInt = IP-a-Int $subnetMask
     $startNet = $startInt -band $maskInt
-    $gwNet    = $gwInt -band $maskInt
+    $endNet = $endInt -band $maskInt
+    if ($startNet -ne $endNet) {
+        Write-Host "La IP inicial y la IP final no pertenecen a la misma subred."
+        return
+    }
+
+    $gateway = Pedir-IP "Gateway"
+
+    $gwInt = IP-a-Int $gateway
+    $gwNet = $gwInt -band $maskInt
 
     if ($gwNet -ne $startNet) {
         Write-Host "El gateway no pertenece al mismo rango de la subred."
         return
     }
-    
+
+    if ($gwInt -lt $startInt -or $gwInt -gt $endInt) {
+        Write-Host "El gateway no se encuentra dentro del rango del ambito DHCP."
+        return
+    }
+
+    $dns = Pedir-IP "DNS"
+
+    do {
+        $lease = Read-Host "Tiempo de concesion (dias)"
+    } until ($lease -match '^\d+$')
+
     try {
 
         # Instalacion silenciosa DHCP
