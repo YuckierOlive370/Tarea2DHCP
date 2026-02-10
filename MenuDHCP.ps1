@@ -1,4 +1,4 @@
-function ValidarIP {
+function Validar-IP {
     param ($ip)
     if ($ip -match '^((25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)\.){3}(25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)$') {
         return ($ip -ne "255.255.255.255" -and $ip -ne "0.0.0.0")
@@ -99,10 +99,10 @@ function InstalarVal {
     $dhcpFeature = Get-WindowsFeature -Name DHCP
     if ($dhcpFeature.Installed) {
         Write-Host "El rol DHCP ya esta instalado."
-        $respuesta = Read-Host "¿Deseas reinstalarlo esto eliminara tus ambitos existenstes? (S/N)"
+        $respuesta = Read-Host "¿Deseas Eliminaro esto eliminara tus ambitos existenstes y se necesitara reinicar tu PC? (S/N)"
         if ($respuesta -match '^[sS]$') {
             Uninstall-WindowsFeature DHCP -ErrorAction Stop | Out-Null
-            Instalar
+            Restart-Computer
         } else {
             Write-Host "Se mantiene la instalacion existente."
         }
