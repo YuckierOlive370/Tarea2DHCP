@@ -1,22 +1,30 @@
 #!/bin/bash
 
-ValidarIp() {
+INTERFAZ="ens37"
+MASCARA="255.255.255.0"
+
+ValidarIp() { # valida formato y descarta 255.255.255.255 y 0.0.0.0
     local ip=$1
     if [[ $ip =~ ^((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])$ ]]; then
-        return 0
-    else
-        return 1
+        [[ "$ip" != "255.255.255.255" && "$ip" != "0.0.0.0" ]]
+        return $?
     fi
+    return 1
+}
+
+IPaInt() {
+    local IFS=.
+    read -r a b c d <<< "$1"
+    echo $(( (a<<24) + (b<<16) + (c<<8) + d ))
 }
 
 PedirIp() {
     local mensaje=$1
-    local ip=""
     while true; do
         read -p "$mensaje" ip
         if ValidarIp "$ip"; then
             echo "$ip"
-            break
+            return
         else
             echo "IP no valida, intenta de nuevo"
         fi
@@ -24,71 +32,98 @@ PedirIp() {
 }
 
 VerificarServicio() {
-    if ! dpkg -l | grep -q isc-dhcp-server; then
-        echo "Instalando Rol DHCP..."
-        sudo apt-get update -y
-        sudo apt-get install isc-dhcp-server -y
-        sudo systemctl enable isc-dhcp-server
+    if dpkg -l | grep -q isc-dhcp-server; then
+        read -p "DHCP ya instalado. ¿Deseas reinstalarlo? (S/N): " r
+        if [[ $r =~ ^[sS]$ ]]; then
+            sudo apt-get remove isc-dhcp-server -y > /dev/null 2>&1
+            Instalar
+        else
+            echo "Se mantiene la instalación existente"
+        fi
     else
-        echo "El servicio DHCP ya esta instalado"
+        echo "El servicio DHCP no esta instalado"
     fi
 
-    echo "Configurando interfaz ens37 para DHCP..."
-    sudo sed -i 's/^INTERFACESv4=.*/INTERFACESv4="ens37"/' /etc/default/isc-dhcp-server
+    sudo sed -i "s/^INTERFACESv4=.*/INTERFACESv4=\"$INTERFAZ\"/" /etc/default/isc-dhcp-server
 }
 
-Configurar() {
+Instalar() { # instalacion silenciosa y validaciones
+    sudo apt-get update -y > /dev/null 2>&1
+    sudo apt-get install isc-dhcp-server -y > /dev/null 2>&1
+    sudo systemctl enable isc-dhcp-server > /dev/null 2>&1
+
     read -p "Nombre del ambito: " scope
     rango_inicio=$(PedirIp "IP inicial: ")
-    rango_fin=$(PedirIp "IP final: ")
+
+    while true; do
+        rango_fin=$(PedirIp "IP final: ")
+        (( $(IPaInt "$rango_inicio") <= $(IPaInt "$rango_fin") )) && break
+        echo "La IP inicial no puede ser mayor que la IP final"
+    done
+
     read -p "Tiempo de concesion (en segundos): " lease_time
     gateway=$(PedirIp "Gateway: ")
     dns=$(PedirIp "DNS: ")
+
+    ipServidor=$(ip -4 addr show $INTERFAZ | grep inet | awk '{print $2}' | cut -d/ -f1)
+
+    ipInt=$(IPaInt "$ipServidor")
+    maskInt=$(IPaInt "$MASCARA")
+    redInt=$(( ipInt & maskInt ))
+
+    gatewayInt=$(IPaInt "$gateway")
+    (( (gatewayInt & maskInt) == redInt )) || {
+        echo "El gateway no pertenece a la misma subred"
+        return
+    }
+
+    red=$(printf "%d.%d.%d.0" \
+        $(( (redInt >> 24) & 255 )) \
+        $(( (redInt >> 16) & 255 )) \
+        $(( (redInt >> 8) & 255 )))
 
     sudo bash -c "cat > /etc/dhcp/dhcpd.conf" <<EOF
 default-lease-time $lease_time;
 max-lease-time $lease_time;
 
-subnet 192.168.100.0 netmask 255.255.255.0 {
+subnet $red netmask $MASCARA {
     range $rango_inicio $rango_fin;
     option routers $gateway;
     option domain-name-servers $dns;
 }
 EOF
 
-    echo "Validando configuración..."
-    sudo dhcpd -t
-    echo "Reiniciando servicio DHCP..."
-    sudo systemctl restart isc-dhcp-server
-}
-
-ConsultarEstado() {
-    echo "Estado del servicio DHCP:"
-    systemctl status isc-dhcp-server --no-pager
+    sudo dhcpd -t && sudo systemctl restart isc-dhcp-server
+    echo "Ambito DHCP configurado correctamente."
 }
 
 ListarConcesiones() {
+    systemctl status isc-dhcp-server --no-pager
     echo "Concesiones activas:"
     cat /var/lib/dhcp/dhcpd.leases
+}
+
+Reiniciar() { # reinicia el servicio dhcp
+    sudo systemctl restart isc-dhcp-server
+    echo "Servicio DHCP reiniciado."
 }
 
 while true; do
     echo "===== Automatización y Gestión del Servidor DHCP ====="
     echo "1.- Verificar la presencia del servicio"
-    echo "2.- Configuración dinámica"
-    echo "3.- Consultar el estado del servicio en tiempo real"
-    echo "4.- Listar las concesiones (leases) activas"
+    echo "2.- Instalar el servicio"
+    echo "3.- Monitoreo"
+    echo "4.- Reiniciar Servicios"
     echo "5.- Salir"
     read -p "Selecciona una opción: " opcion
 
     case $opcion in
         1) VerificarServicio ;;
-        2) Configurar ;;
-        3) ConsultarEstado ;;
-        4) ListarConcesiones ;;
+        2) Instalar ;;
+        3) ListarConcesiones ;;
+        4) Reiniciar ;;
         5) echo "Saliendo..."; break ;;
         *) echo "Opción inválida" ;;
     esac
     echo ""
 done
-
