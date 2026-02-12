@@ -80,11 +80,12 @@ Instalar() {
     # Calcular IP inicial del rango = IP fija + 1 
     inicioInt=$(IPaInt "$ip_fija") 
     inicioInt=$((inicioInt + 1)) 
-    rango_inicio=$(printf "%d.%d.%d.%d" \ 
-    $(( (inicioInt >> 24) & 255 )) \ 
-    $(( (inicioInt >> 16) & 255 )) \ 
-    $(( (inicioInt >> 8) & 255 )) \ 
-    $(( inicioInt & 255 )) ) 
+    rango_inicio=$(printf "%d.%d.%d.%d" \
+        $(( (inicioInt >> 24) & 255 )) \
+        $(( (inicioInt >> 16) & 255 )) \
+        $(( (inicioInt >> 8) & 255 )) \
+        $(( inicioInt & 255 )) )
+
     echo "IP inicial del ámbito: $rango_inicio"
 
     # Configurar IP fija en la interfaz ens37 editando /etc/network/interfaces
