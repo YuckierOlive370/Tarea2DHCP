@@ -97,7 +97,10 @@ EOF
 
     echo "Configuración de red escrita en /etc/network/interfaces.d/$INTERFAZ.cfg"
     echo "Recargando interfaz..."
-    sudo ifdown $INTERFAZ && sudo ifup $INTERFAZ
+    sudo ip addr flush dev $INTERFAZ
+    sudo ip addr add $ip_fija/24 dev $INTERFAZ
+    sudo ip link set $INTERFAZ up
+
 
     while true; do
         rango_fin=$(PedirIp "IP final: ")
@@ -128,13 +131,12 @@ EOF
         $(( (redInt >> 8) & 255 ))
     )
 
-    sudo sed -i "s/^INTERFACESv4=.*/INTERFACESv4=\"$INTERFAZ\"/" /etc/default/isc-dhcp-server
-
     echo "Instalando DHCP..."
     sudo apt-get update -y -qq > /dev/null 2>&1
     sudo apt-get install isc-dhcp-server -y -qq > /dev/null 2>&1
     sudo systemctl enable isc-dhcp-server > /dev/null 2>&1
-
+    sudo sed -i "s/^INTERFACESv4=.*/INTERFACESv4=\"$INTERFAZ\"/" /etc/default/isc-dhcp-server
+    
     options=""
     [[ -n "$gateway" ]] && options+="    option routers $gateway;\n"
 
