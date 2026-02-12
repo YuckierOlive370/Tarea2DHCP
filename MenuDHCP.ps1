@@ -1,7 +1,7 @@
 function Validar-IP {
     param ($ip)
     if ($ip -match '^((25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)\.){3}(25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)$') {
-        return ($ip -ne "255.255.255.255" -and $ip -ne "0.0.0.0")
+        return ($ip -ne "255.255.255.255" -and $ip -ne "0.0.0.0" -and $ip -ne "127.0.0.1")
     }
     return $false
 }
@@ -28,58 +28,91 @@ function Pedir-IP {
     return $ip
 }
 
+function Get-PrefixLength {
+    param([string]$SubnetMask)
+    $bytes = $SubnetMask.Split('.') | ForEach-Object { [Convert]::ToString([int]$_,2).PadLeft(8,'0') }
+    ($bytes -join '').ToCharArray() | Where-Object { $_ -eq '1' } | Measure-Object | Select-Object -ExpandProperty Count
+}
+
 function Instalar {
     param (
         [string]$subnetMask = "255.255.255.0"
     )
-    Write-Host "Servicio DHCP Instalandose..." -ForegroundColor Green
+    Write-Host "Iniciando Configuraciones..." -ForegroundColor Green
 
     $scopeName = Read-Host "Nombre del ambito"
-    $startIP   = Pedir-IP "IP inicial"
+
+    # Capturar la IP fija (servidor)
+    $fixedIP = Pedir-IP "IP fija del servidor"
+    Write-Host "IP fija del servidor: $fixedIP"
+
+    # Configurar la IP fija en la interfaz de red
+    $gateway = Read-Host "Gateway (opcional, no ingreses nada si no aplica)"
+    $prefix = Get-PrefixLength -SubnetMask $subnetMask
+    try {
+        # Aporte soto sol
+        Remove-NetIPAddress -InterfaceIndex 11 -Confirm:$false
+        $interface = Get-NetAdapter -Name "Ethernet1"
+        if ([string]::IsNullOrWhiteSpace($gateway)) {
+            New-NetIPAddress -InterfaceIndex $interface.InterfaceIndex `
+            -IPAddress $fixedIP `
+            -PrefixLength $prefix -ErrorAction Stop | Out-Null
+    } else {
+        New-NetIPAddress -InterfaceIndex $interface.InterfaceIndex `
+            -IPAddress $fixedIP `
+            -PrefixLength $prefix `
+            -DefaultGateway $gateway -ErrorAction Stop | Out-Null
+    }
+    Write-Host "IP fija configurada en la interfaz $($interface.Name)" -ForegroundColor Green
+    } catch {
+        Write-Host "Error al asignar la IP fija: $_" -ForegroundColor Red
+    }
+
+    # Calcular la IP inicial del ámbito = IP fija + 1
+    $fixedInt = IP-a-Int $fixedIP
+    $startInt = $fixedInt + 1
+    $startIP = [System.Net.IPAddress]::Parse(($startInt).ToString())
+    Write-Host "IP inicial del ambito: $startIP"
 
     do {
-        $endIP = Pedir-IP "IP final"
+        # Pedir la IP final
+        $endIP  = Pedir-IP "IP final"
+        $endInt = IP-a-Int $endIP
 
-        $startInt = IP-a-Int $startIP
-        $endInt   = IP-a-Int $endIP
-
+        # Validar rango
         if ($startInt -gt $endInt) {
-            Write-Host "La IP inicial no puede ser mayor que la IP final"
+            Write-Host "La IP inicial no puede ser mayor que la IP final."
         }
-    } until ($startInt -le $endInt)
+
+        # Validar subred
+        elseif ($startNet -ne $endNet) {
+            Write-Host "La IP inicial y la IP final no pertenecen a la misma subred."
+        }
+
+    } until ( ($startInt -le $endInt) -and ($startNet -eq $endNet) )
+
+    Write-Host "Las IPs son validas: mismo rango y misma subred."
 
     $maskInt = IP-a-Int $subnetMask
     $startNet = $startInt -band $maskInt
     $endNet = $endInt -band $maskInt
-    if ($startNet -ne $endNet) {
-        Write-Host "La IP inicial y la IP final no pertenecen a la misma subred."
-        return
-    }
 
-    $gateway = Pedir-IP "Gateway"
-
-    $gwInt = IP-a-Int $gateway
-    $gwNet = $gwInt -band $maskInt
-
-    if ($gwNet -ne $startNet) {
-        Write-Host "El gateway no pertenece al mismo rango de la subred."
-        return
-    }
-
-    $dns = Pedir-IP "DNS"
+    # DNS primario y alternativo opcionales 
+    $dns = Read-Host "DNS primario (opcional)" 
+    $dnsAlt = Read-Host "DNS alternativo (opcional)"
 
     do {
         $lease = Read-Host "Tiempo de concesion (dias)"
     } until ($lease -match '^\d+$')
 
     try {
-
+        Write-Host "Servicio DHCP Instalandose..." -ForegroundColor Green
         # Instalacion silenciosa DHCP
         Install-WindowsFeature DHCP -IncludeManagementTools -ErrorAction Stop | Out-Null
         Import-Module DhcpServer -ErrorAction Stop
         Start-Service DHCPServer
 
-        # Crear el ambito
+    # Crear el ambito
         Add-DhcpServerv4Scope `
             -Name $scopeName `
             -StartRange $startIP `
@@ -87,7 +120,7 @@ function Instalar {
             -SubnetMask $subnetMask `
             -LeaseDuration (New-TimeSpan -Days $lease) | Out-Null
             
-        Write-Host "Ambito creado y configurado correctamente." -ForegroundColor Green
+    Write-Host "Ambito creado y configurado correctamente." -ForegroundColor Green
     }
     catch {
         Write-Host "Error al crear el ambito: $_" -ForegroundColor Red
@@ -95,13 +128,19 @@ function Instalar {
 
     $scope = Get-DhcpServerv4Scope |
     Where-Object { $_.StartRange -eq $startIP -and $_.EndRange -eq $endIP }
-    
-    Set-DhcpServerv4OptionValue `
-    -ScopeId $scope.ScopeId `
-    -Router $gateway `
-    -DnsServer $dns
 
+    # Construir lista de DNS si se ingresaron
+    $dnsList = @()
+    if (-not [string]::IsNullOrWhiteSpace($dns)) { $dnsList += $dns }
+    if (-not [string]::IsNullOrWhiteSpace($dnsAlt)) { $dnsList += $dnsAlt }
 
+    # Aplicar opciones solo si hay valores 
+    if (-not [string]::IsNullOrWhiteSpace($gateway) -or $dnsList.Count -gt 0) {
+        Set-DhcpServerv4OptionValue 
+            -ScopeId $scope.ScopeId `
+            -Router $gateway `
+            -DnsServer $dnsList 
+    }
 }
 
 function InstalarVal {
@@ -138,20 +177,29 @@ function ReiniciarDHCP {
     Write-Host "Reiniciando servicio DHCP..."
     try {
         Restart-Service -Name "DHCPServer" -Force -ErrorAction Stop
-        Write-Host "Servicio DHCP reiniciado correctamente." -ForegroundColor Green
+        Write-Host "Servicio DHCP reiniciado correctamente" -ForegroundColor Green
     } catch {
-        Write-Host "Error al reiniciar el servicio DHCP: $_" -ForegroundColor Red
+        Write-Host "Error al reiniciar el servicio DHCP" -ForegroundColor Red
     }
 }
 
-
-function ListarConcesiones{
-    Get-Service DHCPServer
-
-    Get-DhcpServerv4Lease |
-    Select-Object IPAddress, HostName, ClientId, LeaseExpiryTime |
-    Format-Table -AutoSize
+function ListarConcesiones {
+    Write-Host "Iniciando monitoreo..."
+    try {
+        Get-Service DHCPServer
+        $scopes = Get-DhcpServerv4Scope
+        foreach ($scope in $scopes) {
+            Write-Host "Concesiones para ScopeId $($scope.ScopeId) - $($scope.Name)"
+            Get-DhcpServerv4Lease -ScopeId $scope.ScopeId |
+            Select-Object IPAddress, HostName, ClientId, LeaseExpiryTime |
+            Format-Table -AutoSize
+        }
+    }
+    catch {
+        Write-Host "DHCP no se encuentra instalado" -ForegroundColor Red
+    }
 }
+
 
 $con = "S"
 
