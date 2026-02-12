@@ -10,7 +10,7 @@ ValidarIp() { # valida formato y descarta 255.255.255.255 y 0.0.0.0
         return $?
     fi
     return 1
-}  
+}
 
 IPaInt() {
     local IFS=.
@@ -37,13 +37,13 @@ CalcularMascara() {
     read -r a b c d <<< "$ip"
 
     if (( a >= 1 && a <= 126 )); then
-        echo "255.0.0.0"      # Clase A
+        echo "255.0.0.0"
     elif (( a >= 128 && a <= 191 )); then
-        echo "255.255.0.0"    # Clase B
+        echo "255.255.0.0"
     elif (( a >= 192 && a <= 223 )); then
-        echo "255.255.255.0"  # Clase C
+        echo "255.255.255.0"
     else
-        echo "255.255.255.0"  # Valor por defecto
+        echo "255.255.255.0"
     fi
 }
 
@@ -59,47 +59,46 @@ VerificarServicio() {
     else
         echo "El servicio DHCP no esta instalado"
     fi
-
 }
 
 Instalar() {
     if dpkg -l | grep -q isc-dhcp-server; then
-    echo "DHCP ya esta instalado si quieres volver a instalarlo vee a Verificar servicio..."
-    return 1
+        echo "DHCP ya esta instalado si quieres volver a instalarlo vee a Verificar servicio..."
+        return 1
     fi
 
     echo "Iniciando la configuracion..."
     read -p "Nombre del ambito: " scope
 
-    # Capturar IP fija del servidor 
     ip_fija=$(PedirIp "IP fija del servidor: ")
     mascara=$(CalcularMascara "$ip_fija")
     read -p "Gateway (opcional, deja vacio si no aplica): " gateway
 
     echo "IP fija del servidor: $ip_fija"
-    # Calcular IP inicial del rango = IP fija + 1 
-    inicioInt=$(IPaInt "$ip_fija") 
-    inicioInt=$((inicioInt + 1)) 
+
+    inicioInt=$(IPaInt "$ip_fija")
+    inicioInt=$((inicioInt + 1))
+
     rango_inicio=$(printf "%d.%d.%d.%d" \
         $(( (inicioInt >> 24) & 255 )) \
         $(( (inicioInt >> 16) & 255 )) \
         $(( (inicioInt >> 8) & 255 )) \
-        $(( inicioInt & 255 )) )
+        $(( inicioInt & 255 ))
+    )
+
     echo "IP inicial del ámbito: $rango_inicio"
 
-    # Configurar IP fija en la interfaz ens37 editando /etc/network/interfaces
     sudo bash -c "cat > /etc/network/interfaces.d/$INTERFAZ.cfg" <<EOF
-    auto $INTERFAZ
-    iface $INTERFAZ inet static
-        address $ip_fija
-        netmask $mascara
-    EOF
+auto $INTERFAZ
+iface $INTERFAZ inet static
+    address $ip_fija
+    netmask $mascara
+EOF
 
     echo "Configuración de red escrita en /etc/network/interfaces.d/$INTERFAZ.cfg"
     echo "Recargando interfaz..."
     sudo ifdown $INTERFAZ && sudo ifup $INTERFAZ
 
-#validar la ip final mismo rango
     while true; do
         rango_fin=$(PedirIp "IP final: ")
 
@@ -114,12 +113,11 @@ Instalar() {
         else
             break
         fi
-
     done
 
     echo "IP final valida: $rango_fin"
 
-    read -p "DNS primario (opcional): " dns 
+    read -p "DNS primario (opcional): " dns
     read -p "DNS alternativo (opcional): " dns_alt
     read -p "Tiempo de concesion (en segundos): " lease_time
 
@@ -127,9 +125,9 @@ Instalar() {
     red=$(printf "%d.%d.%d.0" \
         $(( (redInt >> 24) & 255 )) \
         $(( (redInt >> 16) & 255 )) \
-        $(( (redInt >> 8) & 255 )))
+        $(( (redInt >> 8) & 255 ))
+    )
 
-    # Configurar interfaz en /etc/default/isc-dhcp-server
     sudo sed -i "s/^INTERFACESv4=.*/INTERFACESv4=\"$INTERFAZ\"/" /etc/default/isc-dhcp-server
 
     echo "Instalando DHCP..."
@@ -137,9 +135,9 @@ Instalar() {
     sudo apt-get install isc-dhcp-server -y -qq > /dev/null 2>&1
     sudo systemctl enable isc-dhcp-server > /dev/null 2>&1
 
-    # Construir bloque de opciones dinámicamente
     options=""
     [[ -n "$gateway" ]] && options+="    option routers $gateway;\n"
+
     if [[ -n "$dns" || -n "$dns_alt" ]]; then
         dns_list=""
         [[ -n "$dns" ]] && dns_list="$dns"
@@ -147,22 +145,20 @@ Instalar() {
         options+="    option domain-name-servers $dns_list;\n"
     fi
 
-    # Escribir configuración en dhcpd.conf
     sudo bash -c "cat > /etc/dhcp/dhcpd.conf" <<EOF
-    default-lease-time $lease_time;
-    max-lease-time $lease_time;
+default-lease-time $lease_time;
+max-lease-time $lease_time;
 
-    subnet $red netmask $MASCARA {
-        range $rango_inicio $rango_fin;
-    $options}
-    EOF
+subnet $red netmask $MASCARA {
+    range $rango_inicio $rango_fin;
+$options}
+EOF
 
     echo "Validando configuración..."
     sudo dhcpd -t
     echo "Reiniciando servicio DHCP..."
     sudo systemctl restart isc-dhcp-server
     echo "Ambito DHCP configurado correctamente."
-
 }
 
 ListarConcesiones() {
@@ -175,7 +171,7 @@ ListarConcesiones() {
     fi
 }
 
-Reiniciar() { # reinicia el servicio dhcp
+Reiniciar() {
     if dpkg -l | grep -q isc-dhcp-server; then
         sudo systemctl restart isc-dhcp-server
         echo "Servicio DHCP reiniciado."
