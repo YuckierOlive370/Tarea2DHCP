@@ -158,14 +158,17 @@ EOF
     sudo sed -i "s/^INTERFACESv4=.*/INTERFACESv4=\"$INTERFAZ\"/" /etc/default/isc-dhcp-server
 
     options=""
-    [[ -n "$gateway" ]] && options+="    option routers $gateway;\n"
+if [[ -n "$gateway" ]]; then
+    options+=$'    option routers '"$gateway"$';\n'
+fi
 
-    if [[ -n "$dns" || -n "$dns_alt" ]]; then
-        dns_list=""
-        [[ -n "$dns" ]] && dns_list="$dns"
-        [[ -n "$dns_alt" ]] && dns_list="$dns_list, $dns_alt"
-        options+="    option domain-name-servers $dns_list;\n"
-    fi
+if [[ -n "$dns" || -n "$dns_alt" ]]; then
+    dns_list=""
+    [[ -n "$dns" ]] && dns_list="$dns"
+    [[ -n "$dns_alt" ]] && dns_list="$dns_list, $dns_alt"
+    options+=$'    option domain-name-servers '"$dns_list"$';\n'
+fi
+
 
     sudo bash -c "cat > /etc/dhcp/dhcpd.conf" <<EOF
 default-lease-time $lease_time;
