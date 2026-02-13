@@ -48,10 +48,20 @@ CalcularMascara() {
 }
 
 MaskToPrefix() {
-    local IFS=.
-    read -r a b c d <<< "$1"
-    local bin=$(printf "%08b%08b%08b%08b" $a $b $c $d)
-    echo $(( $(grep -o "1" <<< "$bin" | wc -l) ))
+    case "$1" in
+        255.0.0.0) echo 8 ;;
+        255.255.0.0) echo 16 ;;
+        255.255.255.0) echo 24 ;;
+        255.255.255.128) echo 25 ;;
+        255.255.255.192) echo 26 ;;
+        255.255.255.224) echo 27 ;;
+        255.255.255.240) echo 28 ;;
+        255.255.255.248) echo 29 ;;
+        255.255.255.252) echo 30 ;;
+        255.255.255.254) echo 31 ;;
+        255.255.255.255) echo 32 ;;
+        *) echo 0 ;;
+    esac
 }
 
 VerificarServicio() {
