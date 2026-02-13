@@ -47,6 +47,13 @@ CalcularMascara() {
     fi
 }
 
+MaskToPrefix() {
+    local IFS=.
+    read -r a b c d <<< "$1"
+    local bin=$(printf "%08b%08b%08b%08b" $a $b $c $d)
+    echo $(( $(grep -o "1" <<< "$bin" | wc -l) ))
+}
+
 VerificarServicio() {
     if dpkg -l | grep -q isc-dhcp-server; then
         read -p "DHCP ya instalado. ¿Deseas reinstalarlo? (S/N): " r
@@ -72,6 +79,8 @@ Instalar() {
 
     ip_fija=$(PedirIp "IP fija del servidor: ")
     mascara=$(CalcularMascara "$ip_fija")
+    MASCARA="$mascara"
+
     read -p "Gateway (opcional, deja vacio si no aplica): " gateway
 
     echo "IP fija del servidor: $ip_fija"
@@ -98,7 +107,8 @@ EOF
     echo "Configuración de red escrita en /etc/network/interfaces.d/$INTERFAZ.cfg"
     echo "Recargando interfaz..."
     sudo ip addr flush dev $INTERFAZ
-    sudo ip addr add $ip_fija/24 dev $INTERFAZ
+    prefix=$(MaskToPrefix "$mascara")
+    sudo ip addr add $ip_fija/$prefix dev $INTERFAZ
     sudo ip link set $INTERFAZ up
 
 
@@ -107,7 +117,7 @@ EOF
 
         inicioInt=$(IPaInt "$rango_inicio")
         finInt=$(IPaInt "$rango_fin")
-        maskInt=$(IPaInt "$MASCARA")
+        maskInt=$(IPaInt "$mascara")
 
         if (( inicioInt > finInt )); then
             echo "La IP inicial no puede ser mayor que la IP final"
@@ -136,7 +146,7 @@ EOF
     sudo apt-get install isc-dhcp-server -y -qq > /dev/null 2>&1
     sudo systemctl enable isc-dhcp-server > /dev/null 2>&1
     sudo sed -i "s/^INTERFACESv4=.*/INTERFACESv4=\"$INTERFAZ\"/" /etc/default/isc-dhcp-server
-    
+
     options=""
     [[ -n "$gateway" ]] && options+="    option routers $gateway;\n"
 
