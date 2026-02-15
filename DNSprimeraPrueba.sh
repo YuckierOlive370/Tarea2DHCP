@@ -18,25 +18,25 @@ if [[ $EUID -ne 0 ]]; then
     exit 1
 fi
 
-echo "✅ Ejecutando como superusuario"
+echo "Ejecutando como superusuario"
 
 # ===============================
 # MOSTRAR IP Y ADAPTADORES
 # ===============================
-echo "📡 Direcciones IP del sistema:"
+echo "Direcciones IP del sistema:"
 ip a
 
 # ===============================
 # INSTALAR BIND9
 # ===============================
-echo "📦 Instalando BIND9..."
+echo "Instalando BIND9..."
 apt update
 apt install bind9 dnsutils -y
 
 # ===============================
 # CONFIGURAR OPCIONES GENERALES
 # ===============================
-echo "⚙️ Configurando named.conf.options..."
+echo "Configurando named.conf.options..."
 
 cat <<EOF > /etc/bind/named.conf.options
 options {
@@ -59,7 +59,7 @@ EOF
 # ===============================
 # CONFIGURAR ZONAS
 # ===============================
-echo "🗂️ Configurando zonas directa e inversa..."
+echo "Configurando zonas directa e inversa..."
 
 cat <<EOF >> /etc/bind/named.conf.local
 
@@ -77,7 +77,7 @@ EOF
 # ===============================
 # CREAR ZONA DIRECTA
 # ===============================
-echo "📝 Creando zona directa..."
+echo "Creando zona directa..."
 
 cat <<EOF > $ZONA_DIRECTA
 \$TTL    604800
@@ -96,7 +96,7 @@ EOF
 # ===============================
 # CREAR ZONA INVERSA
 # ===============================
-echo "🔁 Creando zona inversa..."
+echo "Creando zona inversa..."
 
 cat <<EOF > $ZONA_INVERSA
 \$TTL    604800
@@ -114,7 +114,7 @@ EOF
 # ===============================
 # VERIFICAR CONFIGURACIÓN
 # ===============================
-echo "🔍 Verificando configuración..."
+echo "Verificando configuración..."
 named-checkconf
 named-checkzone $DOMINIO $ZONA_DIRECTA
 named-checkzone $RED_INVERSA.in-addr.arpa $ZONA_INVERSA
@@ -122,11 +122,11 @@ named-checkzone $RED_INVERSA.in-addr.arpa $ZONA_INVERSA
 # ===============================
 # REINICIAR Y HABILITAR SERVICIO
 # ===============================
-echo "🔄 Reiniciando BIND9..."
+echo "Reiniciando BIND9..."
 systemctl restart bind9
 systemctl enable bind9
 
-echo "📊 Estado del servicio:"
+echo "Estado del servicio:"
 systemctl status bind9 --no-pager
 
-echo "✅ DNS configurado correctamente"
+echo "DNS configurado correctamente"
