@@ -4,9 +4,9 @@
 # VARIABLES (ajusta si es necesario)
 # ===============================
 INTERFAZ="ens37"
-IP_DNS="192.168.1.10"
+IP_DNS="192.168.100.50"
 DOMINIO="reprobados.com"
-RED_INVERSA="1.168.192"
+RED_INVERSA="100.168.192"
 ZONA_DIRECTA="/etc/bind/db.reprobados.com"
 ZONA_INVERSA="/etc/bind/db.192"
 
