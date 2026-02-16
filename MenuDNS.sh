@@ -65,161 +65,228 @@ MaskToPrefix() {
 }
 
 VerificarServicio() {
-    if dpkg -l | grep -q isc-dhcp-server; then
-        read -p "DHCP ya instalado. ¿Deseas reinstalarlo? (S/N): " r
+    if dpkg -l | grep -q bind9; then
+        echo "DNS ya está instalado"
+        read -p "¿Deseas reinstalarlo? (S/N): " r
         if [[ $r =~ ^[sS]$ ]]; then
-            sudo apt-get remove isc-dhcp-server -y > /dev/null 2>&1
-            Instalar
-        else
-            echo "Se mantiene la instalación existente"
+            apt purge bind9 -y
+            apt install bind9 dnsutils -y
         fi
     else
-        echo "El servicio DHCP no esta instalado"
+        echo "El servicio DNS no está instalado"
     fi
+}
+
+CalcularRedInversa() {
+    local ip=$1
+    local IFS=.
+    read -r a b c d <<< "$ip"
+    echo "$c.$b.$a"
+}
+
+PedirValor() {
+    local mensaje=$1
+    local defecto=$2
+    local valor
+
+    read -p "$mensaje [$defecto]: " valor
+    echo "${valor:-$defecto}"
 }
 
 Instalar() {
-    if dpkg -l | grep -q isc-dhcp-server; then
-        echo "DHCP ya esta instalado si quieres volver a instalarlo vee a Verificar servicio..."
+    if dpkg -l | grep -q bind9; then
+        echo "DNS ya esta instalado si quieres volver a instalarlo vee a Verificar servicio..."
+        return 1
+    fi
+    apt update
+    apt install bind9 dnsutils -
+    systemctl enable bind9
+}
+
+Configurar() {
+    echo "===== CONFIGURACIÓN DE DNS ====="
+
+    # Datos principales
+    read -p "Dominio (ej: ejemplo.com): " DOMINIO
+    if grep -q "zone \"$DOMINIO\"" /etc/bind/named.conf.local; then
+    echo "❌ La zona $DOMINIO ya existe"
+    return
+    fi
+
+    IP_DNS=$(PedirIp "IP del servidor DNS: ")
+    RED_INV=$(CalcularRedInversa "$IP_DNS")
+
+    ZONA_DIR="/etc/bind/db.$DOMINIO"
+    ZONA_INV="/etc/bind/db.$RED_INV"
+
+    # Serial automático
+    SERIAL=$(date +%Y%m%d01)
+
+    # Valores SOA configurables
+    REFRESH=$(PedirValor "Refresh (segundos)" 604800)
+    RETRY=$(PedirValor "Retry (segundos)" 86400)
+    EXPIRE=$(PedirValor "Expire (segundos)" 2419200)
+    NEGTTL=$(PedirValor "Negative Cache TTL (segundos)" 604800)
+
+    # Registrar zonas en BIND
+    cat <<EOF >> /etc/bind/named.conf.local
+zone "$DOMINIO" {
+    type master;
+    file "$ZONA_DIR";
+};
+
+zone "$RED_INV.in-addr.arpa" {
+    type master;
+    file "$ZONA_INV";
+};
+EOF
+
+    # Crear zona directa
+    cat <<EOF > $ZONA_DIR
+\$TTL 604800
+@ IN SOA ns1.$DOMINIO. admin.$DOMINIO. (
+    $SERIAL     ; Serial
+    $REFRESH    ; Refresh
+    $RETRY      ; Retry
+    $EXPIRE     ; Expire
+    $NEGTTL )   ; Negative Cache TTL
+
+@   IN NS ns1.$DOMINIO.
+ns1 IN A  $IP_DNS
+www IN A  $IP_DNS
+EOF
+
+    # Zona inversa
+    ULTIMO_OCTETO=${IP_DNS##*.}
+
+    cat <<EOF > $ZONA_INV
+\$TTL 604800
+@ IN SOA ns1.$DOMINIO. admin.$DOMINIO. (
+    $SERIAL
+    $REFRESH
+    $RETRY
+    $EXPIRE
+    $NEGTTL )
+
+@ IN NS ns1.$DOMINIO.
+$ULTIMO_OCTETO IN PTR $DOMINIO.
+EOF
+
+    # Validaciones
+    named-checkconf || return
+    named-checkzone $DOMINIO $ZONA_DIR || return
+    named-checkzone $RED_INV.in-addr.arpa $ZONA_INV || return
+
+    # Reinicio del servicio
+    systemctl restart bind9
+
+    echo "DNS configurado correctamente para $DOMINIO"
+}
+
+Reconfigurar() {
+    echo "===== RECONFIGURANDO DNS ====="
+
+    # Verificar sintaxis global
+    if ! named-checkconf; then
+        echo "Error en la configuración global de BIND"
         return 1
     fi
 
-    echo "Iniciando la configuracion..."
-    read -p "Nombre del ambito: " scope
-
-    ip_fija=$(PedirIp "IP fija del servidor: ")
-    mascara=$(CalcularMascara "$ip_fija")
-    MASCARA="$mascara"
-
-    read -p "Gateway (opcional, deja vacio si no aplica): " gateway
-
-    echo "IP fija del servidor: $ip_fija"
-
-    inicioInt=$(IPaInt "$ip_fija")
-    inicioInt=$((inicioInt + 1))
-
-    rango_inicio=$(printf "%d.%d.%d.%d" \
-        $(( (inicioInt >> 24) & 255 )) \
-        $(( (inicioInt >> 16) & 255 )) \
-        $(( (inicioInt >> 8) & 255 )) \
-        $(( inicioInt & 255 ))
-    )
-
-    echo "IP inicial del ámbito: $rango_inicio"
-
-    sudo bash -c "cat > /etc/network/interfaces.d/$INTERFAZ.cfg" <<EOF
-auto $INTERFAZ
-iface $INTERFAZ inet static
-    address $ip_fija
-    netmask $mascara
-EOF
-
-    echo "Configuración de red escrita en /etc/network/interfaces.d/$INTERFAZ.cfg"
-    echo "Recargando interfaz..."
-    sudo ip addr flush dev $INTERFAZ
-    prefix=$(MaskToPrefix "$mascara")
-    sudo ip addr add $ip_fija/$prefix dev $INTERFAZ
-    sudo ip link set $INTERFAZ up
-
-
-    while true; do
-        rango_fin=$(PedirIp "IP final: ")
-
-        inicioInt=$(IPaInt "$rango_inicio")
-        finInt=$(IPaInt "$rango_fin")
-        maskInt=$(IPaInt "$mascara")
-
-        if (( inicioInt > finInt )); then
-            echo "La IP inicial no puede ser mayor que la IP final"
-        elif (( (inicioInt & maskInt) != (finInt & maskInt) )); then
-            echo "El rango no pertenece a la misma subred"
-        else
-            break
+    # Verificar todas las zonas registradas
+    while read -r zona; do
+        archivo=$(grep -A2 "zone \"$zona\"" /etc/bind/named.conf.local | awk -F\" '/file/ {print $2}')
+        if [[ -f $archivo ]]; then
+            named-checkzone "$zona" "$archivo" || return 1
         fi
-    done
+    done < <(grep 'zone "' /etc/bind/named.conf.local | awk -F\" '{print $2}')
 
-    echo "IP final valida: $rango_fin"
+    # Recargar servicio
+    systemctl reload bind9
 
-    read -p "DNS primario (opcional): " dns
-    read -p "DNS alternativo (opcional): " dns_alt
-    read -p "Tiempo de concesion (en segundos): " lease_time
-
-    redInt=$(( inicioInt & maskInt ))
-    red=$(printf "%d.%d.%d.0" \
-        $(( (redInt >> 24) & 255 )) \
-        $(( (redInt >> 16) & 255 )) \
-        $(( (redInt >> 8) & 255 ))
-    )
-
-    echo "Instalando DHCP..."
-    sudo apt-get update -y -qq > /dev/null 2>&1
-    sudo apt-get install isc-dhcp-server -y -qq > /dev/null 2>&1
-    sudo systemctl enable isc-dhcp-server > /dev/null 2>&1
-    sudo sed -i "s/^INTERFACESv4=.*/INTERFACESv4=\"$INTERFAZ\"/" /etc/default/isc-dhcp-server
-
-    options=""
-if [[ -n "$gateway" ]]; then
-    options+=$'    option routers '"$gateway"$';\n'
-fi
-
-if [[ -n "$dns" || -n "$dns_alt" ]]; then
-    dns_list=""
-    [[ -n "$dns" ]] && dns_list="$dns"
-    [[ -n "$dns_alt" ]] && dns_list="$dns_list, $dns_alt"
-    options+=$'    option domain-name-servers '"$dns_list"$';\n'
-fi
-
-
-    sudo bash -c "cat > /etc/dhcp/dhcpd.conf" <<EOF
-default-lease-time $lease_time;
-max-lease-time $lease_time;
-
-subnet $red netmask $MASCARA {
-    range $rango_inicio $rango_fin;
-$options}
-EOF
-
-    echo "Validando configuración..."
-    sudo dhcpd -t
-    echo "Reiniciando servicio DHCP..."
-    sudo systemctl restart isc-dhcp-server
-    echo "Ambito DHCP configurado correctamente."
-}
-
-ListarConcesiones() {
-    if dpkg -l | grep -q isc-dhcp-server; then
-        systemctl status isc-dhcp-server --no-pager
-        echo "Concesiones activas:"
-        cat /var/lib/dhcp/dhcpd.leases
+    if systemctl is-active --quiet bind9; then
+        echo "DNS recargado correctamente"
     else
-        echo "No esta instalado DHCP"
+        echo "No se pudo recargar, intentando reiniciar..."
+        systemctl restart bind9
     fi
 }
 
-Reiniciar() {
-    if dpkg -l | grep -q isc-dhcp-server; then
-        sudo systemctl restart isc-dhcp-server
-        echo "Servicio DHCP reiniciado."
-    else
-        echo "No esta instalado DHCP"
-    fi
+ABCdominios() {
+    echo "===== ABC DE DOMINIOS DNS ====="
+    echo "1) Alta (crear dominio)"
+    echo "2) Baja (eliminar dominio)"
+    echo "3) Consulta (listar dominios)"
+    echo "4) Volver"
+    read -p "Selecciona una opción: " op
+
+    case $op in
+        1)
+            echo "Alta de dominio"
+            Configurar
+            ;;
+
+        2)
+            echo "Baja de dominio"
+            read -p "Dominio a eliminar (ej: ejemplo.com): " DOM
+
+            # Obtener archivo de zona directa
+            ZONA_DIR=$(grep -A2 "zone \"$DOM\"" /etc/bind/named.conf.local | awk -F\" '/file/ {print $2}')
+
+            if [[ -z $ZONA_DIR ]]; then
+                echo "El dominio no existe"
+                return
+            fi
+
+            # Calcular red inversa desde la IP A
+            IP_DNS=$(grep "IN A" "$ZONA_DIR" | awk '{print $NF}' | head -n1)
+            RED_INV=$(CalcularRedInversa "$IP_DNS")
+            ZONA_INV="/etc/bind/db.$RED_INV"
+
+            # Eliminar zonas del archivo de configuración
+            sed -i "/zone \"$DOM\"/,/};/d" /etc/bind/named.conf.local
+            sed -i "/zone \"$RED_INV.in-addr.arpa\"/,/};/d" /etc/bind/named.conf.local
+
+            # Eliminar archivos de zona
+            rm -f "$ZONA_DIR" "$ZONA_INV"
+
+            # Recargar DNS
+            systemctl reload bind9
+
+            echo "Dominio $DOM eliminado correctamente"
+            ;;
+
+        3)
+            echo "Dominios configurados:"
+            grep 'zone "' /etc/bind/named.conf.local | awk -F\" '{print $2}'
+            ;;
+
+        4)
+            return
+            ;;
+
+        *)
+            echo "Opción inválida"
+            ;;
+    esac
 }
 
 while true; do
-    echo "===== Automatización y Gestión del Servidor DHCP ====="
-    echo "1.- Verificar la presencia del servicio"
-    echo "2.- Instalar el servicio"
-    echo "3.- Monitoreo"
-    echo "4.- Reiniciar Servicios"
-    echo "5.- Salir"
+    echo "===== Automatización y Gestión de DNS ====="
+    echo "1.- Verificar Instalacion"
+    echo "2.- Instalar"
+    echo "3.- Configurar"
+    echo "4.- Reconfigurar"
+    echo "5.- ABC Dominios"
+    echo "6.- Salir"
     read -p "Selecciona una opción: " opcion
 
     case $opcion in
         1) VerificarServicio ;;
         2) Instalar ;;
-        3) ListarConcesiones ;;
-        4) Reiniciar ;;
-        5) echo "Saliendo..."; break ;;
+        3) Configurar ;;
+        4) Reconfigurar ;;
+        5) ABCdominios ;;
+        6) echo "Saliendo..."; break ;;
         *) echo "Opción inválida" ;;
     esac
     echo ""
