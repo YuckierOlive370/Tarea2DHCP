@@ -93,6 +93,24 @@ PedirValor() {
     echo "${valor:-$defecto}"
 }
 
+ConfigurarOpcionesBind() {
+    echo "Configurando named.conf.options..."
+
+    cat <<EOF > /etc/bind/named.conf.options
+options {
+    directory "/var/cache/bind";
+
+    listen-on { any; };
+    listen-on-v6 { any; };
+
+    allow-query { any; };
+
+    recursion yes;
+    dnssec-validation auto;
+};
+EOF
+}
+
 Instalar() {
     if dpkg -l | grep -q bind9; then
         echo "DNS ya esta instalado si quieres volver a instalarlo vee a Verificar servicio..."
@@ -109,12 +127,14 @@ Configurar() {
     # Datos principales
     read -p "Dominio (ej: ejemplo.com): " DOMINIO
     if grep -q "zone \"$DOMINIO\"" /etc/bind/named.conf.local; then
-    echo "❌ La zona $DOMINIO ya existe"
+    echo "La zona $DOMINIO ya existe"
     return
     fi
 
     IP_DNS=$(PedirIp "IP del servidor DNS: ")
     RED_INV=$(CalcularRedInversa "$IP_DNS")
+
+    ConfigurarOpcionesBind
 
     ZONA_DIR="/etc/bind/db.$DOMINIO"
     ZONA_INV="/etc/bind/db.$RED_INV"
